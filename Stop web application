@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stopwatch</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0a0f;
+      color: #e0e0f0;
+      font-family: 'Segoe UI', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .container {
+      background: #111118;
+      border: 1px solid #1e1e2e;
+      border-radius: 24px;
+      padding: 40px 36px 32px;
+      width: min(460px, 95vw);
+      box-shadow: 0 0 60px rgba(0,0,0,0.6);
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 13px;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #00f5c4;
+      margin-bottom: 30px;
+      opacity: 0.8;
+    }
+
+    /* Time Display */
+    .display {
+      text-align: center;
+      margin-bottom: 32px;
+    }
+
+    .time {
+      font-family: 'Courier New', monospace;
+      font-size: 72px;
+      color: #e0e0f0;
+      letter-spacing: -2px;
+    }
+
+    .time.running { color: #00f5c4; }
+
+    .milliseconds {
+      font-family: 'Courier New', monospace;
+      font-size: 28px;
+      color: #555570;
+      margin-top: 4px;
+    }
+
+    /* Buttons */
+    .controls {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-bottom: 28px;
+    }
+
+    button {
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 14px 24px;
+      border-radius: 12px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    #startBtn {
+      background: #00f5c4;
+      color: #0a0a0f;
+      flex: 1;
+    }
+    #startBtn:hover { opacity: 0.85; }
+
+    #startBtn.paused {
+      background: transparent;
+      border-color: #00f5c4;
+      color: #00f5c4;
+    }
+
+    #lapBtn {
+      background: rgba(123,94,167,0.2);
+      border-color: #7b5ea7;
+      color: #7b5ea7;
+      flex: 1;
+    }
+    #lapBtn:hover { background: rgba(123,94,167,0.35); }
+    #lapBtn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    #resetBtn {
+      background: transparent;
+      border-color: #555570;
+      color: #555570;
+      padding: 14px 18px;
+      font-size: 18px;
+    }
+    #resetBtn:hover { border-color: #ff4d6d; color: #ff4d6d; }
+
+    /* Lap List */
+    .laps-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #555570;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #1e1e2e;
+      margin-bottom: 10px;
+    }
+
+    #lapList {
+      max-height: 220px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: #1e1e2e transparent;
+    }
+
+    .lap-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 15px;
+      animation: fadeIn 0.25s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .lap-num { color: #555570; font-size: 12px; letter-spacing: 1px; }
+    .lap-time { font-family: 'Courier New', monospace; font-size: 17px; }
+
+    .lap-item.fastest .lap-time { color: #00f5c4; }
+    .lap-item.slowest .lap-time  { color: #ff4d6d; }
+
+    .no-laps {
+      text-align: center;
+      color: #555570;
+      font-size: 13px;
+      padding: 20px 0;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>⏱ Stopwatch</h1>
+
+  <div class="display">
+    <div class="time" id="time">00:00</div>
+    <div class="milliseconds" id="ms">.00</div>
+  </div>
+
+  <div class="controls">
+    <button id="startBtn" onclick="startStop()">Start</button>
+    <button id="lapBtn"   onclick="recordLap()" disabled>Lap</button>
+    <button id="resetBtn" onclick="reset()">↺</button>
+  </div>
+
+  <div class="laps-header">
+    <span>Lap</span>
+    <span>Time</span>
+    <span>Split</span>
+  </div>
+
+  <div id="lapList">
+    <div class="no-laps" id="noLaps">No laps recorded yet</div>
+  </div>
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────
+  let startTime = 0;   // timestamp when started/resumed
+  let elapsed   = 0;   // total ms accumulated before current run
+  let running   = false;
+  let timerRef  = null;
+  let lapTimes  = [];  // { total, split } for each lap
+  let lastLapAt = 0;   // elapsed ms at last lap
+
+  // ── DOM refs ───────────────────────────────────────────
+  const timeEl   = document.getElementById('time');
+  const msEl     = document.getElementById('ms');
+  const startBtn = document.getElementById('startBtn');
+  const lapBtn   = document.getElementById('lapBtn');
+  const lapList  = document.getElementById('lapList');
+  const noLaps   = document.getElementById('noLaps');
+
+  // ── Helpers ────────────────────────────────────────────
+  function currentMs() {
+    return elapsed + (running ? Date.now() - startTime : 0);
+  }
+
+  function formatTime(ms) {
+    const h  = Math.floor(ms / 3600000);
+    const m  = Math.floor((ms % 3600000) / 60000);
+    const s  = Math.floor((ms % 60000)   / 1000);
+    if (h > 0)
+      return `${pad(h)}:${pad(m)}:${pad(s)}`;
+    return `${pad(m)}:${pad(s)}`;
+  }
+
+  function formatMs(ms) {
+    return '.' + String(Math.floor((ms % 1000) / 10)).padStart(2, '0');
+  }
+
+  function pad(n) {
+    return String(n).padStart(2, '0');
+  }
+
+  // ── Update display every frame ─────────────────────────
+  function updateDisplay() {
+    const now = currentMs();
+    timeEl.textContent = formatTime(now);
+    msEl.textContent   = formatMs(now);
+  }
+
+  function tick() {
+    updateDisplay();
+    timerRef = requestAnimationFrame(tick);
+  }
+
+  // ── Start / Pause ──────────────────────────────────────
+  function startStop() {
+    if (!running) {
+      // START or RESUME
+      startTime = Date.now();
+      running   = true;
+      timerRef  = requestAnimationFrame(tick);
+
+      startBtn.textContent = 'Pause';
+      startBtn.classList.add('paused');
+      timeEl.classList.add('running');
+      lapBtn.disabled = false;
+
+    } else {
+      // PAUSE
+      elapsed  += Date.now() - startTime;
+      running   = false;
+      cancelAnimationFrame(timerRef);
+
+      startBtn.textContent = 'Resume';
+      startBtn.classList.remove('paused');
+      timeEl.classList.remove('running');
+    }
+  }
+
+  // ── Reset ──────────────────────────────────────────────
+  function reset() {
+    cancelAnimationFrame(timerRef);
+    running   = false;
+    elapsed   = 0;
+    lastLapAt = 0;
+    lapTimes  = [];
+
+    updateDisplay();
+
+    startBtn.textContent = 'Start';
+    startBtn.classList.remove('paused');
+    timeEl.classList.remove('running');
+    lapBtn.disabled = true;
+
+    lapList.innerHTML = '';
+    lapList.appendChild(noLaps);
+  }
+
+  // ── Record Lap ─────────────────────────────────────────
+  function recordLap() {
+    const now   = currentMs();
+    const split = now - lastLapAt;
+    lapTimes.push({ total: now, split });
+    lastLapAt = now;
+    renderLaps();
+  }
+
+  // ── Render Lap List ────────────────────────────────────
+  function renderLaps() {
+    lapList.innerHTML = '';
+
+    if (lapTimes.length === 0) {
+      lapList.appendChild(noLaps);
+      return;
+    }
+
+    // Find fastest & slowest splits
+    const splits  = lapTimes.map(l => l.split);
+    const fastest = Math.min(...splits);
+    const slowest = Math.max(...splits);
+
+    // Show newest lap first
+    [...lapTimes].reverse().forEach((lap, ri) => {
+      const i   = lapTimes.length - 1 - ri;
+      const div = document.createElement('div');
+      div.className = 'lap-item';
+
+      if (lapTimes.length > 1) {
+        if (lap.split === fastest) div.classList.add('fastest');
+        else if (lap.split === slowest) div.classList.add('slowest');
+      }
+
+      div.innerHTML = `
+        <span class="lap-num">LAP ${pad(i + 1)}</span>
+        <span class="lap-time">${formatTime(lap.total)}${formatMs(lap.total)}</span>
+        <span class="lap-time" style="color:#555570">
+          ${formatTime(lap.split)}${formatMs(lap.split)}
+        </span>
+      `;
+      lapList.appendChild(div);
+    });
+  }
+
+  // Init display
+  updateDisplay();
+</script>
+
+</body>
+</html>
